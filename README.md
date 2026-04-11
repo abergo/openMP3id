@@ -1,6 +1,6 @@
-# Music Organizer Agent
+# openMP3id
 
-Music Organizer is an automated Python script that identifies your unnamed or untagged MP3 files by "listening" to them using audio fingerprinting. It retrieves correct metadata (Artist, Album, Title) from the Shazam API, writes those ID3 tags permanently into the MP3 file, and copies them into a beautifully structured `<Artist>/<Album>/<Song Name>.mp3` folder hierarchy.
+openMP3id is an automated Python script that identifies your unnamed or untagged MP3 files by "listening" to them using audio fingerprinting. It retrieves correct metadata (Artist, Album, Title) from the Shazam API, writes those ID3 tags permanently into the MP3 file, and copies them into a beautifully structured `<Artist>/<Album>/<Song Name>.mp3` folder hierarchy.
 
 ## Features
 - **Audio Fingerprinting**: Uses `shazamio` to identify songs regardless of their current filename.
