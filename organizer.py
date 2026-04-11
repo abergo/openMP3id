@@ -8,12 +8,13 @@ from shazamio import Shazam
 from mutagen.easyid3 import EasyID3
 import mutagen
 from mutagen.id3 import ID3NoHeaderError
+import database
 
 def sanitize_filename(name):
     # Remove characters that are problematic in filenames on Windows/Linux/Mac
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
 
-async def process_file(shazam, input_file, output_dir):
+async def process_file(shazam, input_file, output_dir, conn):
     print(f"Processing: {input_file.name}")
     try:
         # identify the song
@@ -53,10 +54,28 @@ async def process_file(shazam, input_file, output_dir):
         target_path = target_dir / f"{safe_title}.mp3"
         
         # Prevent overwriting if file already exists with same name
+        # Implement Deduplication Logic based on exact file size
         counter = 1
-        while target_path.exists():
-            target_path = target_dir / f"{safe_title} ({counter}).mp3"
+        is_duplicate = False
+        current_target = target_dir / f"{safe_title}.mp3"
+        
+        while current_target.exists():
+            # Check if it's an exact duplicate (using file size for speed)
+            if os.path.getsize(input_file) == os.path.getsize(current_target):
+                is_duplicate = True
+                # Log the duplicate
+                log_path = output_dir / "duplicates_log.txt"
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"DUPLICATE SKIPPED: '{input_file.absolute()}' is identical to an already organized file at '{current_target.absolute()}'\n")
+                
+                print(f"  [-] Skipped Duplicate: {input_file.name}. Identical to {current_target.name}")
+                return # Skip copying and database insertion completely
+            
+            # File exists but sizes differ (different version/rip quality), keep both by appending counter
+            current_target = target_dir / f"{safe_title} ({counter}).mp3"
             counter += 1
+            
+        target_path = current_target
             
         # Copy the file
         shutil.copy2(input_file, target_path)
@@ -81,6 +100,16 @@ async def process_file(shazam, input_file, output_dir):
         audio['album'] = album
         audio.save()
         
+        # --- Database Insertion ---
+        relative_path = os.path.relpath(target_path, output_dir)
+        # Standardize path separator for cross-platform portability
+        relative_path = Path(relative_path).as_posix()
+        
+        art_id = database.get_or_create_artist(conn, artist)
+        rec_id = database.get_or_create_record(conn, art_id, album, None)
+        database.insert_song(conn, rec_id, title, relative_path)
+        # --------------------------
+        
         print(f"  [+] Recognized and Organized -> {artist} - {title}")
         
     except Exception as e:
@@ -97,6 +126,11 @@ async def main_async(input_path, output_path):
         
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Initialize Database
+    db_path = output_dir / "openmp3id.db"
+    database.init_db(db_path)
+    conn = database.get_connection(db_path)
+    
     # gather all mp3 cases insensitively
     mp3_files = list(input_dir.rglob("*.[mM][pP]3"))
     
@@ -109,8 +143,9 @@ async def main_async(input_path, output_path):
     
     # Process files sequentially to avoid rate limiting or overloading Shazam's free API wrapper
     for file in mp3_files:
-        await process_file(shazam, file, output_dir)
+        await process_file(shazam, file, output_dir, conn)
         
+    conn.close()
     print("\nOrganization complete! Enjoy your organized library.")
 
 def main():

@@ -7,6 +7,7 @@ openMP3id is an automated Python script that identifies your unnamed or untagged
 - **Zero Data Loss**: Safely **copies** the identified songs to a new directory instead of overwriting, ensuring your original collection remains perfectly intact.
 - **Auto ID3 Tagging**: Imprints the retrieved data straight into the file's ID3 metadata using `mutagen`.
 - **Intelligent Sorting**: Moves any unidentified tracks into an `Unknown` directory for easy manual curation.
+- **Movable SQLite Database**: Automatically constructs an `openmp3id.db` relational database tracking Artists, Albums, and Songs directly in your destination folder. It uses relative paths, making your entire music library and database 100% portable.
 
 ## Installation
 
