@@ -10,39 +10,33 @@ openMP3id is an automated Python agent that identifies your unnamed or untagged 
 - **Intelligent Sorting**: Moves any unidentified tracks into an `Unknown` directory for easy manual curation.
 - **Movable SQLite Database**: Automatically constructs an `openmp3id.db` relational database tracking Artists, Albums, and Songs directly in your destination folder. It uses relative paths, making your entire music library and database 100% portable.
 
-## 🐳 Recommended Usage: Docker
+## 🚀 Quick Start (Interactive Wizard)
 
-Because multi-format conversion requires `FFmpeg` (which is notoriously tricky to configure on native Windows), the most robust and secure way to run `openMP3id` is via Docker. This keeps your host machine completely clean.
+The fastest and safest way to run the agent is using our zero-dependency interactive launcher. Simply open your terminal and run:
 
-1. **Build the Container Image:**
-   ```bash
-   docker build -t openmp3id .
-   ```
-2. **Run it:**
-   Mount your local messy music folder directly to `/input_music`, and your desired output folder to `/organized_library`.
-   ```bash
-   docker run -v "C:\Path\To\Raw\Music:/input_music" -v "C:\Path\To\Output:/organized_library" openmp3id
-   ```
+```bash
+python start.py
+```
 
-## Native Python Installation
+The CLI wizard will boot up and ask you to select how you want to run the engine:
 
-Ensure you have Python 3.10+ installed. You **must also manually install FFmpeg** and add it to your System PATH variables to process non-mp3 files!
+1. **🐳 Docker Secure Container (Highly Recommended)**
+   - The wizard will ask you to paste your Input and Output paths, automatically build the `FFmpeg` container, and securely execute the pipeline via volume-mounts. Your main computer remains totally unpolluted!
+   
+2. **🐍 Native Python Virtual Environment**
+   - The wizard will instantly construct an isolated workspace (`venv/`), discreetly install all dependencies into it, request your audio paths, and trigger the logic securely underneath.
+   - *Note: To process non-MP3 files (like WMA or FLAC) via Native Mode, you must ensure `FFmpeg` is installed on your host computer.*
 
-Then, from the project directory, install the required dependencies:
+## Manual Execution (Advanced)
 
+If you prefer to bypass the UI Wizard and type out your mounting paths manually, you can trigger the python engine natively.
+
+Ensure you have Python 3.10+ installed. Install the required dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-## Usage
-
-Run the script via command line by passing the path containing your raw loose files, and the output path where you want the structured library built:
-
-```bash
-python organizer.py -i "/path/to/raw_mp3s" -o "/path/to/output_folder"
-```
-
-**Example:**
+Run the core script by passing the path containing your raw loose files `-i`, and the output path `-o`:
 ```bash
 python organizer.py -i "C:\Users\username\Desktop\raw_music" -o "C:\Users\username\Desktop\organized_library"
 ```
