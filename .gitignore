@@ -12,3 +12,6 @@ organized_library/
 # Environment
 .env
 .DS_Store
+.venv/
+venv/
+env/

@@ -45,7 +45,7 @@ def run_native():
     print("Warning: This requires FFmpeg to be installed on your host system to process non-MP3 files natively.")
     input("Press Enter to continue or Ctrl+C to abort...")
     
-    venv_dir = Path("venv")
+    venv_dir = Path(".venv")
     if not venv_dir.exists():
         print("\n  [~] Creating isolated Python Virtual Environment...")
         venv.create(venv_dir, with_pip=True)
