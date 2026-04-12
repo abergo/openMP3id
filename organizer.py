@@ -33,8 +33,12 @@ async def process_file(shazam, input_file, output_dir, conn, original_file_path=
         
     print(f"Processing: {original_file_path.name}")
     try:
-        # identify the song
-        out = await shazam.recognize(str(input_file))
+        # identify the song with a strict 15-second timeout to prevent infinite socket hanging
+        try:
+            out = await asyncio.wait_for(shazam.recognize(str(input_file)), timeout=15.0)
+        except (asyncio.TimeoutError, Exception) as network_err:
+            print(f"  [!] Shazam API network timeout/error for {original_file_path.name}: {network_err}")
+            out = {}  # Empty dictionary forces it down our structured fallback path
         
         cover_art_url = None
         lyrics_text = ""
@@ -289,6 +293,9 @@ async def main_async(input_path, output_path):
                 os.remove(processing_file)
             except:
                 pass
+                
+        # Rate-Limiting Buffer: Force a standard delay between tracks so Shazam doesn't IP ban/throttle the agent
+        await asyncio.sleep(1.5)
         
     conn.close()
     print("\nOrganization complete! Enjoy your organized library.")
