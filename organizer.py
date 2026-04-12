@@ -149,23 +149,33 @@ async def process_file(shazam, input_file, output_dir, conn, original_file_path=
         shutil.copy2(input_file, target_path)
         
         # Update metadata tags
-        try:
-            audio = EasyID3(target_path)
-        except ID3NoHeaderError:
-            # File does not have ID3 tags yet, create them safely
-            file_mut = mutagen.File(target_path, easy=True)
-            if file_mut is None:
-                # Fallback if mutagen cannot interpret the file at all natively
-                empty_tags = ID3()
-                empty_tags.save(target_path)
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            try:
+                audio = EasyID3(target_path)
+            except ID3NoHeaderError:
+                # File does not have ID3 tags yet, create them safely
                 file_mut = mutagen.File(target_path, easy=True)
-            file_mut.add_tags()
-            audio = file_mut
+                if file_mut is None:
+                    # Fallback if mutagen cannot interpret the file at all natively
+                    empty_tags = ID3()
+                    empty_tags.save(target_path)
+                    file_mut = mutagen.File(target_path, easy=True)
+                file_mut.add_tags()
+                audio = file_mut
+                
+            audio['title'] = title
+            audio['artist'] = artist
+            audio['album'] = album
+            audio.save()
             
-        audio['title'] = title
-        audio['artist'] = artist
-        audio['album'] = album
-        audio.save()
+            # Print custom handled warnings tied explicitly to the filename
+            for warning in w:
+                if "crc mismatch" in str(warning.message).lower():
+                    print(f"{progress_str}  [~] Notice: {original_file_path.name} has a broken MP3 Table of Contents (Harmless CRC Mismatch). Proceeding cleanly.")
+                else:
+                    print(f"{progress_str}  [~] Audio Header Warning ({original_file_path.name}): {str(warning.message)}")
         
         # --- Advanced ID3 Tags (Cover Art & Lyrics) ---
         image_data = None
