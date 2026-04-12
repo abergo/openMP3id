@@ -20,11 +20,41 @@ def validate_path(prompt_text, create_if_missing=False):
         else:
             print("  [!] Error: That path does not exist. Please enter a valid directory.")
 
+def load_env():
+    env_vars = {}
+    env_path = Path(".env")
+    if env_path.exists():
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        env_vars[k.strip()] = v.strip().strip("'").strip('"')
+    return env_vars
+
+def get_path_from_env_or_prompt(env_vars, env_key, prompt_text, create_if_missing=False):
+    if env_key in env_vars:
+        path_str = env_vars[env_key]
+        p = Path(path_str)
+        if p.exists() and p.is_dir():
+            print(f"  [+] Loaded {env_key} from .env: {p.absolute()}")
+            return str(p.absolute())
+        elif create_if_missing:
+            print(f"  [+] Loaded {env_key} from .env. Creating {p.absolute()}...")
+            p.mkdir(parents=True, exist_ok=True)
+            return str(p.absolute())
+        else:
+            print(f"  [!] Invalid path in .env for {env_key}. Falling back to manual prompt.")
+            
+    return validate_path(prompt_text, create_if_missing)
+
 def run_docker():
     clear_screen()
     print("=== DOCKER MODE ===")
-    input_path = validate_path("\nPlease paste the absolute path to your RAW music folder:\n> ", create_if_missing=False)
-    output_path = validate_path("\nPlease paste the absolute path to save your ORGANIZED library:\n> ", create_if_missing=True)
+    env_vars = load_env()
+    input_path = get_path_from_env_or_prompt(env_vars, "INPUT_FOLDER", "\nPlease paste the absolute path to your RAW music folder:\n> ", create_if_missing=False)
+    output_path = get_path_from_env_or_prompt(env_vars, "OUTPUT_FOLDER", "\nPlease paste the absolute path to save your ORGANIZED library:\n> ", create_if_missing=True)
     
     print("\n  [~] Building Docker Image (this is fast if already built)...")
     build_code = os.system("docker build -t openmp3id .")
@@ -61,8 +91,9 @@ def run_native():
     print("\n  [~] Verifying dependencies inside Virtual Environment...")
     subprocess.check_call([pip_exe, "install", "--no-cache-dir", "-r", "requirements.txt"])
     
-    input_path = validate_path("\nPlease paste the absolute path to your RAW music folder:\n> ", create_if_missing=False)
-    output_path = validate_path("\nPlease paste the absolute path to save your ORGANIZED library:\n> ", create_if_missing=True)
+    env_vars = load_env()
+    input_path = get_path_from_env_or_prompt(env_vars, "INPUT_FOLDER", "\nPlease paste the absolute path to your RAW music folder:\n> ", create_if_missing=False)
+    output_path = get_path_from_env_or_prompt(env_vars, "OUTPUT_FOLDER", "\nPlease paste the absolute path to save your ORGANIZED library:\n> ", create_if_missing=True)
     
     print("\n  [~] Booting Native openMP3id agent...\n")
     subprocess.check_call([python_exe, "organizer.py", "-i", input_path, "-o", output_path])
