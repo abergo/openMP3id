@@ -27,11 +27,11 @@ async def download_image(url):
         print(f"      [~] Warning: Failed to download cover art: {e}")
     return None
 
-async def process_file(shazam, input_file, output_dir, conn, original_file_path=None, base_input_dir=None):
+async def process_file(shazam, input_file, output_dir, conn, original_file_path=None, base_input_dir=None, progress_str=""):
     if original_file_path is None:
         original_file_path = input_file
         
-    print(f"Processing: {original_file_path.name}")
+    print(f"\n{progress_str}Processing: {original_file_path.name}")
     try:
         # identify the song with a strict 15-second timeout to prevent infinite socket hanging
         try:
@@ -250,16 +250,19 @@ async def main_async(input_path, output_path):
     print(f"Copying and organizing into: {output_dir.absolute()}\n")
     
     # Process files sequentially to avoid rate limiting or overloading Shazam's free API wrapper
-    for file in audio_files:
+    total_files = len(audio_files)
+    for i, file in enumerate(audio_files):
         # Ignore macOS shadow files and hidden files natively
         if file.name.startswith('.'):
             continue
+            
+        progress_str = f"[{i+1}/{total_files}] "
             
         # Check SQLite State Cache before starting expensive operations
         try:
             file_size = os.path.getsize(file)
             if database.is_file_processed(conn, str(file), file_size):
-                print(f"Skipping (Already Processed): {file.name}")
+                print(f"{progress_str}Skipping (Already Cache Processed): {file.name}")
                 continue
         except Exception:
             pass
@@ -268,7 +271,7 @@ async def main_async(input_path, output_path):
         processing_file = file
         
         if file.suffix.lower() != '.mp3':
-            print(f"  [~] Transcoding {file.name} to MP3...")
+            print(f"{progress_str}[~] Transcoding {file.name} to MP3...")
             try:
                 # WMA files sometimes load better if explicitly told 'asf'
                 input_format = file.suffix.lower().lstrip('.')
@@ -283,10 +286,10 @@ async def main_async(input_path, output_path):
                 processing_file = Path(temp_path)
                 is_temp = True
             except Exception as e:
-                print(f"  [X] Failed to convert {file.name}. Ensure FFmpeg is installed! Error: {str(e)}")
+                print(f"{progress_str}[X] Failed to convert {file.name}. Ensure FFmpeg is installed! Error: {str(e)}")
                 continue
                 
-        await process_file(shazam, processing_file, output_dir, conn, original_file_path=file, base_input_dir=input_dir)
+        await process_file(shazam, processing_file, output_dir, conn, original_file_path=file, base_input_dir=input_dir, progress_str=progress_str)
         
         if is_temp:
             try:
