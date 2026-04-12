@@ -172,8 +172,11 @@ async def process_file(shazam, input_file, output_dir, conn, original_file_path=
             
             # Print custom handled warnings tied explicitly to the filename
             for warning in w:
-                if "crc mismatch" in str(warning.message).lower():
+                w_str = str(warning.message).lower()
+                if "crc mismatch" in w_str:
                     print(f"{progress_str}  [~] Notice: {original_file_path.name} has a broken MP3 Table of Contents (Harmless CRC Mismatch). Proceeding cleanly.")
+                elif "wcom frame" in w_str or "invalid data for" in w_str:
+                    print(f"{progress_str}  [~] Notice: {original_file_path.name} contains malformed/legacy ID3 markers natively. Ignoring harmlessly.")
                 else:
                     print(f"{progress_str}  [~] Audio Header Warning ({original_file_path.name}): {str(warning.message)}")
         
