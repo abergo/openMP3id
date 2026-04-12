@@ -1,20 +1,14 @@
-# Environments
-.env
-
-# MacOS
-.DS_Store
-
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
 
-# Environments
+# Project Specific
+raw_music/
+organized_library/
+*.db
+*.db-journal
+*.swp
+
+# Environment
 .env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+.DS_Store

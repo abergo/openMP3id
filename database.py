@@ -44,6 +44,16 @@ def init_db(db_path):
     )
     ''')
     
+    # Create Processed Sources Table (Cache)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS processed_sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_path TEXT NOT NULL,
+        byte_size INTEGER NOT NULL,
+        UNIQUE(source_path, byte_size)
+    )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -80,3 +90,13 @@ def insert_song(conn, record_id, title, relative_path):
     cursor.execute('INSERT INTO songs (record_id, title, track_file_path) VALUES (?, ?, ?)', (record_id, title, relative_path))
     conn.commit()
     return cursor.lastrowid
+
+def is_file_processed(conn, source_path, byte_size):
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM processed_sources WHERE source_path = ? AND byte_size = ?', (source_path, byte_size))
+    return cursor.fetchone() is not None
+
+def mark_file_processed(conn, source_path, byte_size):
+    cursor = conn.cursor()
+    cursor.execute('INSERT OR IGNORE INTO processed_sources (source_path, byte_size) VALUES (?, ?)', (source_path, byte_size))
+    conn.commit()
