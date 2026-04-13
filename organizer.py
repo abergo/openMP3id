@@ -17,6 +17,25 @@ def sanitize_filename(name):
     # Remove characters that are problematic in filenames on Windows/Linux/Mac
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
 
+def is_robust_metadata(title, artist, album):
+    if not title: return False
+    lower_title = title.lower().strip()
+    if lower_title.startswith("track ") or lower_title == "unknown" or lower_title == "unknown title":
+        return False
+        
+    is_valid_artist = bool(artist) and artist.lower() not in ["unknown", "unknown artist"]
+    is_valid_album = bool(album) and album.lower() not in ["unknown", "unknown album"]
+    
+    # If it has a specific title and AT LEAST an artist or album, it's robust
+    if is_valid_artist or is_valid_album:
+        return True
+        
+    # If it has only a title, but it's very descriptive, assume it's robust
+    if len(lower_title) > 10 and " " in lower_title:
+        return True
+        
+    return False
+
 async def download_image(url):
     try:
         async with aiohttp.ClientSession() as session:
@@ -33,51 +52,98 @@ async def process_file(shazam, input_file, output_dir, conn, original_file_path=
         
     print(f"\n{progress_str}Processing: {original_file_path.name}")
     try:
-        # identify the song with a strict 15-second timeout to prevent infinite socket hanging
-        try:
-            out = await asyncio.wait_for(shazam.recognize(str(input_file)), timeout=15.0)
-        except (asyncio.TimeoutError, Exception) as network_err:
-            print(f"  [!] Shazam API network timeout/error for {original_file_path.name}: {network_err}")
-            out = {}  # Empty dictionary forces it down our structured fallback path
+        # --- Pre-extract existing metadata and folder structure ---
+        local_title, local_artist, local_album = None, None, None
+        local_genre, local_year, local_track_number = None, None, None
+        local_duration, local_bitrate = None, None
         
+        try:
+            # Physical File properties
+            file_mut = mutagen.File(input_file)
+            if file_mut and file_mut.info:
+                local_duration = int(file_mut.info.length) if hasattr(file_mut.info, 'length') else None
+                local_bitrate = int(file_mut.info.bitrate / 1000) if hasattr(file_mut.info, 'bitrate') else None
+
+            # ID3 Tag properties
+            audio_tags = EasyID3(input_file)
+            local_title = audio_tags.get('title', [None])[0]
+            local_artist = audio_tags.get('artist', [None])[0]
+            local_album = audio_tags.get('album', [None])[0]
+            local_genre = audio_tags.get('genre', [None])[0]
+            local_year = audio_tags.get('date', [None])[0]
+            local_track_number = audio_tags.get('tracknumber', [None])[0]
+            
+            # Clean up year
+            if local_year and len(str(local_year)) >= 4:
+                local_year = int(str(local_year)[:4])
+            else:
+                local_year = None
+                
+        except Exception:
+            pass
+            
+        if not local_artist or not local_album:
+            if base_input_dir:
+                try:
+                    rel_path = original_file_path.relative_to(base_input_dir)
+                    parts = rel_path.parts
+                    if len(parts) >= 3 and not local_artist:
+                        local_artist = parts[-3]
+                    if len(parts) >= 2 and not local_album:
+                        local_album = parts[-2]
+                except ValueError:
+                    pass
+                    
+        # --- Heuristic to prevent Shazam from hallucinating on SFX/Ambient tracks ---
+        is_sfx = False
+        if local_album:
+            lower_album = local_album.lower()
+            if 'sound' in lower_album or 'sfx' in lower_album or 'effect' in lower_album:
+                is_sfx = True
+                
+        # --- Flawless Metadata Check ---
+        is_flawless = False
+        if is_robust_metadata(local_title, local_artist, local_album) and local_genre and local_year:
+            is_flawless = True
+                
+        out = {}
         cover_art_url = None
         lyrics_text = ""
+        shazam_id = None
+
+        if not is_sfx and not is_flawless:
+            # identify the song with a strict 15-second timeout to prevent infinite socket hanging
+            try:
+                out = await asyncio.wait_for(shazam.recognize(str(input_file)), timeout=15.0)
+            except (asyncio.TimeoutError, Exception) as network_err:
+                print(f"  [!] Shazam API network timeout/error for {original_file_path.name}: {network_err}")
+        elif is_sfx:
+            print(f"  [>] SFX detected in local metadata/path ('{local_album}'). Skipping Shazam API to prevent false positives.")
+        elif is_flawless:
+            print(f"  [>] Flawless local ID3 tags detected. Skipping Shazam API entirely.")
         
         if 'track' not in out:
-            print(f"  [!] Shazam could not recognize {original_file_path.name}. Initiating fallback...")
+            if not is_sfx and not is_flawless:
+                print(f"  [!] Shazam could not recognize {original_file_path.name}. Initiating fallback...")
             
-            title, artist, album = None, None, None
+            title, artist, album = local_title, local_artist, local_album
+            genre, release_year, track_number = local_genre, local_year, local_track_number
+                        
+            # Apply defaults before verifying failure
+            title = title if title else original_file_path.stem
+            artist = artist if artist else "Unknown Artist"
+            album = album if album else "Unknown Album"
             
-            # Fallback 1: Try existing ID3 tags
-            try:
-                audio_tags = EasyID3(input_file)
-                title = audio_tags.get('title', [None])[0]
-                artist = audio_tags.get('artist', [None])[0]
-                album = audio_tags.get('album', [None])[0]
-            except Exception:
-                pass
-                
-            # Fallback 2: Extract from folder structure
-            if not artist or not album:
-                if base_input_dir:
-                    try:
-                        rel_path = original_file_path.relative_to(base_input_dir)
-                        parts = rel_path.parts
-                        
-                        # Expected structure: Artist / Album / Track.ext
-                        if len(parts) >= 3 and not artist:
-                            artist = parts[-3]
-                        if len(parts) >= 2 and not album:
-                            album = parts[-2]
-                    except ValueError:
-                        pass
-                        
-            # If all fallbacks fail, move bare file to unknown
-            if not artist or not title:
-                print(f"  [X] Full metadata failure. Moving to Unknown.")
+            # If all fallbacks fail (which now means all are purely Unknown/Filename), 
+            # we check if it was literally entirely unknown (no tags, no folder structure).
+            # But since we provide defaults, it will ALWAYS have a title, artist, and album.
+            # However, if we WANT to move bare files to Unknown root directory instead of
+            # 'Unknown Artist/Unknown Album', we can check if both artist and album were defaults.
+            if artist == "Unknown Artist" and album == "Unknown Album":
+                print(f"  [X] Full metadata failure. Moving bare file to Unknown.")
                 unknown_dir = output_dir / "Unknown"
                 unknown_dir.mkdir(parents=True, exist_ok=True)
-                target_path = unknown_dir / original_file_path.with_suffix('.mp3').name
+                target_path = unknown_dir / f"{sanitize_filename(title)}.mp3"
                 shutil.copy2(input_file, target_path)
                 
                 # Register in cache even if unknown so we don't repeatedly fail on it
@@ -87,16 +153,17 @@ async def process_file(shazam, input_file, output_dir, conn, original_file_path=
                     pass
                 return
             else:
-                title = title if title else original_file_path.stem
-                album = album if album else "Unknown Album"
                 print(f"  [>] Recovered Metadata: Artist='{artist}', Album='{album}'")
         else:
             track = out['track']
-            title = track.get('title', 'Unknown Title')
-            artist = track.get('subtitle', 'Unknown Artist')
+            shazam_title = track.get('title', 'Unknown Title')
+            shazam_artist = track.get('subtitle', 'Unknown Artist')
+            shazam_id = track.get('key')
+            shazam_genre = track.get('genres', {}).get('primary')
             
             # Extract Album, Cover Art, and Lyrics if available
-            album = "Unknown Album"
+            shazam_album = "Unknown Album"
+            shazam_release_year = None
             cover_art_url = track.get('images', {}).get('coverart')
             
             if 'sections' in track:
@@ -104,11 +171,38 @@ async def process_file(shazam, input_file, output_dir, conn, original_file_path=
                     if section.get('type') == 'SONG':
                         for meta in section.get('metadata', []):
                             if meta.get('title') == 'Album':
-                                album = meta.get('text')
-                                break
+                                shazam_album = meta.get('text')
+                            elif meta.get('title') == 'Released':
+                                shazam_release_year = meta.get('text')
                     elif section.get('type') == 'LYRICS':
                         lyrics = section.get('text', [])
                         lyrics_text = "\n".join(lyrics)
+
+            # --- Priority Check: Local Metadata vs Shazam ---
+            if is_robust_metadata(local_title, local_artist, local_album):
+                print(f"  [INFO] Prioritizing robust local metadata over Shazam match ('{shazam_title}' by '{shazam_artist}').")
+                title = local_title if local_title else shazam_title
+                artist = local_artist if local_artist else shazam_artist
+                album = local_album if local_album else shazam_album
+                genre = local_genre if local_genre else shazam_genre
+                release_year = local_year if local_year else shazam_release_year
+                track_number = local_track_number
+                
+                # Make a note in the exceptions database table
+                try:
+                    database.add_exception(conn, str(original_file_path), f"{title} - {artist}", f"{shazam_title} - {shazam_artist}")
+                except Exception as db_err:
+                    print(f"      [~] Notice: Failed to log exception to DB: {db_err}")
+            else:
+                title, artist, album = shazam_title, shazam_artist, shazam_album
+                genre = local_genre if local_genre else shazam_genre
+                track_number = local_track_number
+                
+                release_year = None
+                if shazam_release_year and str(shazam_release_year).isdigit():
+                    release_year = int(shazam_release_year)
+                elif local_year:
+                    release_year = local_year
                             
         # Clean strings for filesystem
         safe_title = sanitize_filename(title)
@@ -168,7 +262,10 @@ async def process_file(shazam, input_file, output_dir, conn, original_file_path=
             audio['title'] = title
             audio['artist'] = artist
             audio['album'] = album
-            audio.save()
+            if genre: audio['genre'] = genre
+            if release_year: audio['date'] = str(release_year)
+            if track_number: audio['tracknumber'] = str(track_number)
+            audio.save(v2_version=3)
             
             # Print custom handled warnings tied explicitly to the filename
             for warning in w:
@@ -217,8 +314,12 @@ async def process_file(shazam, input_file, output_dir, conn, original_file_path=
         relative_path = Path(relative_path).as_posix()
         
         art_id = database.get_or_create_artist(conn, artist)
-        rec_id = database.get_or_create_record(conn, art_id, album, None)
-        database.insert_song(conn, rec_id, title, relative_path)
+        rec_id = database.get_or_create_record(conn, art_id, album, release_year, genre, cover_art_url)
+        database.insert_song(
+            conn, rec_id, title, relative_path,
+            duration=local_duration, bitrate=local_bitrate,
+            track_number=track_number, shazam_id=shazam_id, has_lyrics=bool(lyrics_text)
+        )
         # --------------------------
         
         print(f"  [+] Recognized and Organized -> {artist} - {title}")

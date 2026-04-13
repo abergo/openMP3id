@@ -98,17 +98,50 @@ def run_native():
     print("\n  [~] Booting Native openMP3id agent...\n")
     subprocess.check_call([python_exe, "organizer.py", "-i", input_path, "-o", output_path])
 
-def main():
+def run_db_tools():
     clear_screen()
-    print("Welcome to openMP3id - The Automated Music Librarian")
-    print("="*50)
-    print("Select your launch configuration:")
-    print("  [1] \U0001F433 Docker Secure Container (Highly Recommended)")
-    print("  [2] \U0001F40D Native Python Virtual Environment")
-    print("  [3] Exit")
+    print("=== DATABASE MANAGEMENT TOOLS ===")
     
+    env_vars = load_env()
+    output_path = get_path_from_env_or_prompt(env_vars, "OUTPUT_FOLDER", "\nPlease paste the absolute path to your ORGANIZED library (where openmp3id.db is stored):\n> ", create_if_missing=False)
+    
+    db_path = str(Path(output_path) / "openmp3id.db")
+    
+    print(f"\nTarget Database: {db_path}")
+    print("\nSelect an action:")
+    print("  [1] Reset Database (Wipes all database tracking/indexes)")
+    print("  [2] Scan Directory (Reads MP3 tags and populates the Database)")
+    print("  [3] Cancel & Go Back")
+    
+    venv_dir = Path(".venv")
+    if os.name == 'nt':
+        python_exe = str(venv_dir / "Scripts" / "python.exe") if venv_dir.exists() else "python"
+    else:
+        python_exe = str(venv_dir / "bin" / "python") if venv_dir.exists() else "python3"
+        
+    choice = input("\nEnter choice (1/2/3): ").strip()
+    if choice == '1':
+        confirm = input(f"Are you sure you want to delete the database? (y/N): ").strip().lower()
+        if confirm == 'y':
+            subprocess.check_call([python_exe, "manage_db.py", "--db", db_path, "--reset"])
+    elif choice == '2':
+        scan_dir = validate_path("\nEnter the absolute directory to scan (usually your ORGANIZED library):\n> ", create_if_missing=False)
+        subprocess.check_call([python_exe, "manage_db.py", "--db", db_path, "--scan", scan_dir])
+        
+    input("\nPress Enter to return to main menu...")
+
+def main():
     while True:
-        choice = input("\nEnter choice (1/2/3): ").strip()
+        clear_screen()
+        print("Welcome to openMP3id - The Automated Music Librarian")
+        print("="*50)
+        print("Select your launch configuration:")
+        print("  [1] \U0001F433 Docker Secure Container (Highly Recommended)")
+        print("  [2] \U0001F40D Native Python Virtual Environment")
+        print("  [3] \U0001F4C1 Database Management Tools")
+        print("  [4] Exit")
+        
+        choice = input("\nEnter choice (1/2/3/4): ").strip()
         if choice == '1':
             run_docker()
             break
@@ -116,9 +149,12 @@ def main():
             run_native()
             break
         elif choice == '3':
+            run_db_tools()
+        elif choice == '4':
             sys.exit(0)
         else:
             print("Invalid selection.")
+            input("Press Enter to continue...")
 
 if __name__ == "__main__":
     main()

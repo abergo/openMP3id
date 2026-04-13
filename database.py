@@ -28,6 +28,8 @@ def init_db(db_path):
         artist_id INTEGER NOT NULL,
         title TEXT NOT NULL,
         release_year INTEGER,
+        genre TEXT,
+        cover_art_url TEXT,
         FOREIGN KEY (artist_id) REFERENCES artists (id),
         UNIQUE(artist_id, title)
     )
@@ -40,6 +42,11 @@ def init_db(db_path):
         record_id INTEGER NOT NULL,
         title TEXT NOT NULL,
         track_file_path TEXT NOT NULL UNIQUE,
+        duration INTEGER,
+        bitrate INTEGER,
+        track_number TEXT,
+        shazam_id TEXT,
+        has_lyrics BOOLEAN,
         FOREIGN KEY (record_id) REFERENCES records (id)
     )
     ''')
@@ -51,6 +58,17 @@ def init_db(db_path):
         source_path TEXT NOT NULL,
         byte_size INTEGER NOT NULL,
         UNIQUE(source_path, byte_size)
+    )
+    ''')
+    
+    # Create Exceptions Table for when local metadata is prioritized over Shazam
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS metadata_exceptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_path TEXT NOT NULL,
+        local_title TEXT,
+        shazam_title TEXT,
+        logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
     
@@ -68,18 +86,27 @@ def get_or_create_artist(conn, name):
         conn.commit()
         return cursor.lastrowid
 
-def get_or_create_record(conn, artist_id, title, release_year=None):
+def get_or_create_record(conn, artist_id, title, release_year=None, genre=None, cover_art_url=None):
     cursor = conn.cursor()
     cursor.execute('SELECT id FROM records WHERE artist_id = ? AND title = ?', (artist_id, title))
     row = cursor.fetchone()
     if row:
+        # Optionally update existing record with potentially richer data
+        cursor.execute(
+            'UPDATE records SET release_year = COALESCE(release_year, ?), genre = COALESCE(genre, ?), cover_art_url = COALESCE(cover_art_url, ?) WHERE id = ?',
+            (release_year, genre, cover_art_url, row['id'])
+        )
+        conn.commit()
         return row['id']
     else:
-        cursor.execute('INSERT INTO records (artist_id, title, release_year) VALUES (?, ?, ?)', (artist_id, title, release_year))
+        cursor.execute(
+            'INSERT INTO records (artist_id, title, release_year, genre, cover_art_url) VALUES (?, ?, ?, ?, ?)',
+            (artist_id, title, release_year, genre, cover_art_url)
+        )
         conn.commit()
         return cursor.lastrowid
 
-def insert_song(conn, record_id, title, relative_path):
+def insert_song(conn, record_id, title, relative_path, duration=None, bitrate=None, track_number=None, shazam_id=None, has_lyrics=False):
     cursor = conn.cursor()
     # Check if song path already exists to avoid duplicates
     cursor.execute('SELECT id FROM songs WHERE track_file_path = ?', (relative_path,))
@@ -87,7 +114,10 @@ def insert_song(conn, record_id, title, relative_path):
     if row:
         return row['id']
     
-    cursor.execute('INSERT INTO songs (record_id, title, track_file_path) VALUES (?, ?, ?)', (record_id, title, relative_path))
+    cursor.execute(
+        'INSERT INTO songs (record_id, title, track_file_path, duration, bitrate, track_number, shazam_id, has_lyrics) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (record_id, title, relative_path, duration, bitrate, track_number, shazam_id, has_lyrics)
+    )
     conn.commit()
     return cursor.lastrowid
 
@@ -99,4 +129,9 @@ def is_file_processed(conn, source_path, byte_size):
 def mark_file_processed(conn, source_path, byte_size):
     cursor = conn.cursor()
     cursor.execute('INSERT OR IGNORE INTO processed_sources (source_path, byte_size) VALUES (?, ?)', (source_path, byte_size))
+    conn.commit()
+
+def add_exception(conn, source_path, local_title, shazam_title):
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO metadata_exceptions (source_path, local_title, shazam_title) VALUES (?, ?, ?)', (source_path, local_title, shazam_title))
     conn.commit()
