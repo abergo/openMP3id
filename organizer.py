@@ -15,7 +15,8 @@ import database
 
 def sanitize_filename(name):
     # Remove characters that are problematic in filenames on Windows/Linux/Mac
-    return re.sub(r'[\\/*?:"<>|]', "", name).strip()
+    safe_name = re.sub(r'[\\/*?:"<>|]', "", name).strip(' .')
+    return safe_name if safe_name else "Unknown"
 
 def is_robust_metadata(title, artist, album):
     if not title: return False
