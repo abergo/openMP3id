@@ -10,6 +10,9 @@ def clear_screen():
 def validate_path(prompt_text, create_if_missing=False):
     while True:
         path_str = input(prompt_text).strip().strip('"').strip("'")
+        if not path_str:
+            print("  [!] Error: Path cannot be empty.")
+            continue
         p = Path(path_str)
         if p.exists() and p.is_dir():
             return str(p.absolute())
@@ -33,34 +36,27 @@ def load_env():
                         env_vars[k.strip()] = v.strip().strip("'").strip('"')
     return env_vars
 
-def get_path_from_env_or_prompt(env_vars, env_key, prompt_text, create_if_missing=False):
-    if env_key in env_vars:
-        path_str = env_vars[env_key]
-        p = Path(path_str)
-        if p.exists() and p.is_dir():
-            print(f"  [+] Loaded {env_key} from .env: {p.absolute()}")
-            return str(p.absolute())
-        elif create_if_missing:
-            print(f"  [+] Loaded {env_key} from .env. Creating {p.absolute()}...")
-            p.mkdir(parents=True, exist_ok=True)
-            return str(p.absolute())
-        else:
-            print(f"  [!] Invalid path in .env for {env_key}. Falling back to manual prompt.")
-            
-    return validate_path(prompt_text, create_if_missing)
+def save_env(env_vars):
+    with open(".env", "w", encoding="utf-8") as f:
+        for k, v in env_vars.items():
+            f.write(f'{k}="{v}"\n')
 
-def run_docker():
+def get_python_exe():
+    venv_dir = Path(".venv")
+    if os.name == 'nt':
+        return str(venv_dir / "Scripts" / "python.exe") if venv_dir.exists() else "python"
+    else:
+        return str(venv_dir / "bin" / "python") if venv_dir.exists() else "python3"
+
+def run_docker(input_path, output_path):
     clear_screen()
     print("=== DOCKER MODE ===")
-    env_vars = load_env()
-    input_path = get_path_from_env_or_prompt(env_vars, "INPUT_FOLDER", "\nPlease paste the absolute path to your RAW music folder:\n> ", create_if_missing=False)
-    output_path = get_path_from_env_or_prompt(env_vars, "OUTPUT_FOLDER", "\nPlease paste the absolute path to save your ORGANIZED library:\n> ", create_if_missing=True)
-    
     print("\n  [~] Building Docker Image (this is fast if already built)...")
     build_code = os.system("docker build -t openmp3id .")
     if build_code != 0:
         print("  [!] Error: Docker failed to build. Is Docker Desktop running?")
-        sys.exit(1)
+        input("Press Enter to return to menu...")
+        return
         
     print(f"\n  [~] Running openMP3id securely via Docker container...")
     print(f"      Mapping Input : {input_path}")
@@ -68,19 +64,19 @@ def run_docker():
     
     run_cmd = f'docker run --rm -v "{input_path}:/input_music" -v "{output_path}:/organized_library" openmp3id'
     os.system(run_cmd)
+    input("\nPress Enter to return to main menu...")
 
-def run_native():
+def run_native(input_path, output_path):
     clear_screen()
     print("=== NATIVE VENV MODE ===")
     print("Warning: This requires FFmpeg to be installed on your host system to process non-MP3 files natively.")
-    input("Press Enter to continue or Ctrl+C to abort...")
+    input("\nPress Enter to continue or Ctrl+C to abort...")
     
     venv_dir = Path(".venv")
     if not venv_dir.exists():
         print("\n  [~] Creating isolated Python Virtual Environment...")
         venv.create(venv_dir, with_pip=True)
         
-    # Determine execution paths for windows vs posix
     if os.name == 'nt':
         pip_exe = str(venv_dir / "Scripts" / "pip.exe")
         python_exe = str(venv_dir / "Scripts" / "python.exe")
@@ -91,69 +87,114 @@ def run_native():
     print("\n  [~] Verifying dependencies inside Virtual Environment...")
     subprocess.check_call([pip_exe, "install", "--no-cache-dir", "-r", "requirements.txt"])
     
-    env_vars = load_env()
-    input_path = get_path_from_env_or_prompt(env_vars, "INPUT_FOLDER", "\nPlease paste the absolute path to your RAW music folder:\n> ", create_if_missing=False)
-    output_path = get_path_from_env_or_prompt(env_vars, "OUTPUT_FOLDER", "\nPlease paste the absolute path to save your ORGANIZED library:\n> ", create_if_missing=True)
-    
     print("\n  [~] Booting Native openMP3id agent...\n")
-    subprocess.check_call([python_exe, "organizer.py", "-i", input_path, "-o", output_path])
-
-def run_db_tools():
-    clear_screen()
-    print("=== DATABASE MANAGEMENT TOOLS ===")
-    
-    env_vars = load_env()
-    output_path = get_path_from_env_or_prompt(env_vars, "OUTPUT_FOLDER", "\nPlease paste the absolute path to your ORGANIZED library (where openmp3id.db is stored):\n> ", create_if_missing=False)
-    
-    db_path = str(Path(output_path) / "openmp3id.db")
-    
-    print(f"\nTarget Database: {db_path}")
-    print("\nSelect an action:")
-    print("  [1] Reset Database (Wipes all database tracking/indexes)")
-    print("  [2] Scan Directory (Reads MP3 tags and populates the Database)")
-    print("  [3] Cancel & Go Back")
-    
-    venv_dir = Path(".venv")
-    if os.name == 'nt':
-        python_exe = str(venv_dir / "Scripts" / "python.exe") if venv_dir.exists() else "python"
-    else:
-        python_exe = str(venv_dir / "bin" / "python") if venv_dir.exists() else "python3"
-        
-    choice = input("\nEnter choice (1/2/3): ").strip()
-    if choice == '1':
-        confirm = input(f"Are you sure you want to delete the database? (y/N): ").strip().lower()
-        if confirm == 'y':
-            subprocess.check_call([python_exe, "manage_db.py", "--db", db_path, "--reset"])
-    elif choice == '2':
-        scan_dir = validate_path("\nEnter the absolute directory to scan (usually your ORGANIZED library):\n> ", create_if_missing=False)
-        subprocess.check_call([python_exe, "manage_db.py", "--db", db_path, "--scan", scan_dir])
-        
+    try:
+        subprocess.check_call([python_exe, "organizer.py", "-i", input_path, "-o", output_path])
+    except subprocess.CalledProcessError:
+        print("\n  [!] Agent exited with an error.")
     input("\nPress Enter to return to main menu...")
+
+def configure_paths(env_vars):
+    clear_screen()
+    print("=== CONFIGURE PATHS ===")
+    print("Current Input :", env_vars.get("INPUT_FOLDER", "Not Set"))
+    print("Current Output:", env_vars.get("OUTPUT_FOLDER", "Not Set"))
+    
+    print("\n[Press Enter without typing to keep current value]")
+    
+    new_input = input("\nEnter absolute path for RAW music folder:\n> ").strip().strip('"').strip("'")
+    if new_input:
+        if Path(new_input).exists() and Path(new_input).is_dir():
+            env_vars["INPUT_FOLDER"] = str(Path(new_input).absolute())
+        else:
+            print("  [!] Error: Provided path is not a valid directory. Keeping previous input.")
+            
+    new_output = input("\nEnter absolute path for ORGANIZED library (Output):\n> ").strip().strip('"').strip("'")
+    if new_output:
+        p = Path(new_output)
+        if not p.exists():
+            print(f"Directory doesn't exist. Creating {p.absolute()}...")
+            p.mkdir(parents=True, exist_ok=True)
+        env_vars["OUTPUT_FOLDER"] = str(p.absolute())
+        
+    save_env(env_vars)
+    print("\n  [+] Settings updated.")
+    input("Press Enter to continue...")
+    return env_vars
+
+def prompt_missing_paths(env_vars):
+    updated = False
+    if "INPUT_FOLDER" not in env_vars or not Path(env_vars["INPUT_FOLDER"]).exists():
+        print("\n[!] Input folder missing or invalid.")
+        input_val = validate_path("Please paste the absolute path to your RAW music folder:\n> ", create_if_missing=False)
+        env_vars["INPUT_FOLDER"] = input_val
+        updated = True
+        
+    if "OUTPUT_FOLDER" not in env_vars:
+        print("\n[!] Output folder missing or invalid.")
+        output_val = validate_path("Please paste the absolute path to save your ORGANIZED library:\n> ", create_if_missing=True)
+        env_vars["OUTPUT_FOLDER"] = output_val
+        updated = True
+
+    if updated:
+        save_env(env_vars)
+    return env_vars
 
 def main():
     while True:
         clear_screen()
+        env_vars = load_env()
+        input_dir = env_vars.get("INPUT_FOLDER", "Not Set")
+        output_dir = env_vars.get("OUTPUT_FOLDER", "Not Set")
+
+        db_path = None
+        db_exists = False
+        if output_dir != "Not Set" and Path(output_dir).exists():
+            db_path = Path(output_dir) / "openmp3id.db"
+            db_exists = db_path.exists()
+
         print("Welcome to openMP3id - The Automated Music Librarian")
         print("="*50)
-        print("Select your launch configuration:")
-        print("  [1] \U0001F433 Docker Secure Container (Highly Recommended)")
-        print("  [2] \U0001F40D Native Python Virtual Environment")
-        print("  [3] \U0001F4C1 Database Management Tools")
-        print("  [4] Exit")
+        print("Current Configuration:")
+        print(f"  [Input]  RAW folder : {input_dir}")
+        print(f"  [Output] ORG library: {output_dir}")
+        print(f"  [DB]     Status     : {'Exists (Ready)' if db_exists else 'Not Found (Will create on run)'}")
+        print("="*50)
+
+        print("Select an action:")
+        print("  [1] \U0001F433 START openMP3id (Docker - Default/Recommended)")
+        print("  [2] \U0001F40D START openMP3id (Native Python venv)")
+        print("  [3] \u2699\uFE0F  Configure Paths")
+        if db_exists:
+            print("  [4] \U0001F5D1\uFE0F  Delete/Reset Database")
+            print("  [5] \U0001F50E Scan Output Directory (Update DB)")
+        print("  [0] Exit")
         
-        choice = input("\nEnter choice (1/2/3/4): ").strip()
+        choice = input("\nEnter choice: ").strip()
+        
         if choice == '1':
-            run_docker()
-            break
+            env_vars = prompt_missing_paths(env_vars)
+            run_docker(env_vars["INPUT_FOLDER"], env_vars["OUTPUT_FOLDER"])
         elif choice == '2':
-            run_native()
-            break
+            env_vars = prompt_missing_paths(env_vars)
+            run_native(env_vars["INPUT_FOLDER"], env_vars["OUTPUT_FOLDER"])
         elif choice == '3':
-            run_db_tools()
-        elif choice == '4':
+            env_vars = configure_paths(env_vars)
+        elif choice == '4' and db_exists:
+            confirm = input(f"\nAre you sure you want to delete '{db_path}'? (y/N): ").strip().lower()
+            if confirm == 'y':
+                python_exe = get_python_exe()
+                subprocess.check_call([python_exe, "manage_db.py", "--db", str(db_path), "--reset"])
+                input("\nPress Enter to continue...")
+        elif choice == '5' and db_exists:
+            scan_dir = validate_path(f"\nEnter the absolute directory to scan (default {output_dir}):\n> ", create_if_missing=False)
+            python_exe = get_python_exe()
+            subprocess.check_call([python_exe, "manage_db.py", "--db", str(db_path), "--scan", scan_dir])
+            input("\nPress Enter to continue...")
+        elif choice == '0':
             sys.exit(0)
         else:
-            print("Invalid selection.")
+            print("\nInvalid selection.")
             input("Press Enter to continue...")
 
 if __name__ == "__main__":
